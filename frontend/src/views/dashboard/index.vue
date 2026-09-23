@@ -7,7 +7,7 @@
             <el-icon><Position /></el-icon>
           </div>
           <div class="stat-content">
-            <div class="stat-value">{{ statistics.wellCount || 0 }}</div>
+            <div class="stat-value">{{ wellStore.statistics.total || 0 }}</div>
             <div class="stat-label">总井数</div>
           </div>
         </div>
@@ -18,7 +18,7 @@
             <el-icon><Monitor /></el-icon>
           </div>
           <div class="stat-content">
-            <div class="stat-value">{{ statistics.drillingCount || 0 }}</div>
+            <div class="stat-value">{{ wellStore.statistics.byStatus['钻井中'] || 0 }}</div>
             <div class="stat-label">钻井中</div>
           </div>
         </div>
@@ -29,7 +29,7 @@
             <el-icon><TrendCharts /></el-icon>
           </div>
           <div class="stat-content">
-            <div class="stat-value">{{ statistics.productionCount || 0 }}</div>
+            <div class="stat-value">{{ wellStore.statistics.byStatus['生产中'] || 0 }}</div>
             <div class="stat-label">生产中</div>
           </div>
         </div>
@@ -106,15 +106,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch, nextTick } from 'vue'
 import * as echarts from 'echarts'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
+import { useWellStore } from '@/store/modules/well'
 
+const wellStore = useWellStore()
+
+// 告警数量不属于井位数据，保留本地
 const statistics = ref({
-  wellCount: 156,
-  drillingCount: 12,
-  productionCount: 89,
   alarmCount: 5
 })
 
@@ -129,6 +130,8 @@ const alarmList = ref([
 const productionTrendChart = ref<HTMLElement>()
 const wellStatusChart = ref<HTMLElement>()
 const mapContainer = ref<HTMLElement>()
+
+let statusChart: echarts.ECharts | null = null
 
 const getAlarmType = (level: string) => {
   const map: Record<string, any> = {
@@ -172,10 +175,30 @@ const initProductionTrendChart = () => {
   window.addEventListener('resize', () => chart.resize())
 }
 
+const STATUS_COLORS: Record<string, string> = {
+  生产中: '#22c55e',
+  钻井中: '#3b82f6',
+  待修井: '#f59e0b',
+  关停井: '#ef4444'
+}
+
 const initWellStatusChart = () => {
   if (!wellStatusChart.value) return
-  const chart = echarts.init(wellStatusChart.value)
-  chart.setOption({
+  statusChart = echarts.init(wellStatusChart.value)
+  renderWellStatusChart()
+  window.addEventListener('resize', () => statusChart?.resize())
+}
+
+// 数据由井位 store 派生，井位页增删改后这里同步刷新，不残留旧值
+const renderWellStatusChart = () => {
+  if (!statusChart) return
+  const { byStatus } = wellStore.statistics
+  const data = Object.keys(STATUS_COLORS).map(name => ({
+    value: byStatus[name] || 0,
+    name,
+    itemStyle: { color: STATUS_COLORS[name] }
+  }))
+  statusChart.setOption({
     tooltip: { trigger: 'item' },
     legend: { orient: 'vertical', left: 'left' },
     series: [
@@ -183,17 +206,11 @@ const initWellStatusChart = () => {
         name: '井状态',
         type: 'pie',
         radius: '60%',
-        data: [
-          { value: 89, name: '生产中', itemStyle: { color: '#22c55e' } },
-          { value: 12, name: '钻井中', itemStyle: { color: '#3b82f6' } },
-          { value: 35, name: '待修井', itemStyle: { color: '#f59e0b' } },
-          { value: 20, name: '关停井', itemStyle: { color: '#ef4444' } }
-        ],
+        data,
         emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0, 0, 0, 0.5)' } }
       }
     ]
   })
-  window.addEventListener('resize', () => chart.resize())
 }
 
 const initMap = () => {
@@ -208,26 +225,22 @@ const initMap = () => {
     })
     
     map.on('load', () => {
-      const wells = [
-        { lng: 118.5, lat: 38.2, name: 'A-01井', status: 'production' },
-        { lng: 118.8, lat: 38.5, name: 'B-03井', status: 'drilling' },
-        { lng: 119.1, lat: 38.3, name: 'C-02井', status: 'production' },
-        { lng: 118.6, lat: 38.7, name: 'D-05井', status: 'maintenance' }
-      ]
-      
+      // 标记点来自共享井位数据，井位页编辑坐标/删除后此处同步
+      const wells = wellStore.wells
+
       wells.forEach(well => {
         const el = document.createElement('div')
         el.className = 'well-marker'
-        el.style.backgroundColor = well.status === 'production' ? '#22c55e' : well.status === 'drilling' ? '#3b82f6' : '#f59e0b'
+        el.style.backgroundColor = STATUS_COLORS[well.status] || '#94a3b8'
         el.style.width = '16px'
         el.style.height = '16px'
         el.style.borderRadius = '50%'
         el.style.border = '2px solid #fff'
         el.style.boxShadow = '0 2px 4px rgba(0,0,0,0.3)'
-        
+
         new mapboxgl.Marker(el)
-          .setLngLat([well.lng, well.lat])
-          .setPopup(new mapboxgl.Popup({ offset: 25 }).setHTML(`<h4>${well.name}</h4><p>状态: ${well.status}</p>`))
+          .setLngLat([well.longitude, well.latitude])
+          .setPopup(new mapboxgl.Popup({ offset: 25 }).setHTML(`<h4>${well.wellName}</h4><p>状态: ${well.status}</p>`))
           .addTo(map)
       })
     })
@@ -236,11 +249,22 @@ const initMap = () => {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
+  // 每次进入驾驶舱都刷新井位数据，卡片、饼图、地图标记与井位管理页保持一致
+  await wellStore.fetchWells(true)
   initProductionTrendChart()
   initWellStatusChart()
   initMap()
 })
+
+// 数据在本页面停留期间发生变化时（理论上编辑弹窗也可能全局触发），同步饼图
+watch(
+  () => wellStore.statistics,
+  () => {
+    nextTick(() => renderWellStatusChart())
+  },
+  { deep: true }
+)
 </script>
 
 <style scoped lang="scss">

@@ -7,7 +7,7 @@
           <h3 v-else>WLMS</h3>
         </div>
         <el-menu
-          :default-active="$route.path"
+          :default-active="activeMenu"
           :collapse="isCollapse"
           router
           background-color="#0f172a"
@@ -17,16 +17,16 @@
           <template v-for="item in menuList" :key="item.path">
             <el-sub-menu v-if="item.children && item.children.length > 0" :index="item.path">
               <template #title>
-                <el-icon><component :is="item.meta.icon" /></el-icon>
-                <span>{{ item.meta.title }}</span>
+                <el-icon><component :is="item.meta!.icon" /></el-icon>
+                <span>{{ item.meta!.title }}</span>
               </template>
               <el-menu-item v-for="child in item.children" :key="child.path" :index="`${item.path}/${child.path}`">
-                {{ child.meta.title }}
+                {{ child.meta!.title }}
               </el-menu-item>
             </el-sub-menu>
             <el-menu-item v-else :index="item.path">
-              <el-icon><component :is="item.meta.icon" /></el-icon>
-              <template #title>{{ item.meta.title }}</template>
+              <el-icon><component :is="item.meta!.icon" /></el-icon>
+              <template #title>{{ item.meta!.title }}</template>
             </el-menu-item>
           </template>
         </el-menu>
@@ -41,6 +41,7 @@
             </el-icon>
             <el-breadcrumb separator="/">
               <el-breadcrumb-item :to="{ path: '/' }">首页</el-breadcrumb-item>
+              <el-breadcrumb-item v-if="parentTitle">{{ parentTitle }}</el-breadcrumb-item>
               <el-breadcrumb-item>{{ currentTitle }}</el-breadcrumb-item>
             </el-breadcrumb>
           </div>
@@ -87,11 +88,26 @@ const isCollapse = ref(false)
 
 const menuList = computed(() => {
   const routes = router.options.routes.find(r => r.path === '/')?.children || []
-  return routes.filter(r => r.meta?.title && r.path !== '')
+  return routes.filter(r => r.meta?.title && r.path !== '' && !r.meta?.hidden)
+})
+
+// 详情等隐藏页高亮其父级菜单
+const activeMenu = computed(() => {
+  return (route.meta?.activeMenu as string) || route.path
 })
 
 const currentTitle = computed(() => {
   return route.meta?.title || ''
+})
+
+// 隐藏页（如井位详情）在面包屑中显示其父级入口
+const parentTitle = computed(() => {
+  const active = route.meta?.activeMenu as string | undefined
+  if (!active) return ''
+  const parent = router.options.routes
+    .find(r => r.path === '/')
+    ?.children?.find(r => `/${r.path}` === active || r.path === active)
+  return parent?.meta?.title || ''
 })
 
 const handleCommand = (command: string) => {

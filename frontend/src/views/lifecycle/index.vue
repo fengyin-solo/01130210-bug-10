@@ -174,10 +174,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, watch, computed } from 'vue'
+import { ref, onMounted, watch, computed } from 'vue'
 import * as echarts from 'echarts'
-import { getWellList } from '@/api/well'
-import { getWellLifecycle } from '@/api/lifecycle'
+import { useWellStore } from '@/store/modules/well'
 
 interface Well {
   id: number
@@ -201,9 +200,12 @@ interface Stage {
   documents?: Array<{ name: string; type: string; size: string; uploadTime: string }>
 }
 
-const wellList = ref<Well[]>([])
+const wellStore = useWellStore()
+
+// 下拉数据直接来自全局井位数据源：井位页新增/编辑/删除后这里同步变化
+const wellList = computed<Well[]>(() => wellStore.wells)
 const selectedWellId = ref<number | null>(null)
-const selectedWell = ref<Well | null>(null)
+const selectedWell = computed(() => wellList.value.find(w => w.id === selectedWellId.value) || null)
 const lifecycleStages = ref<Stage[]>([])
 const selectedStage = ref<Stage | null>(null)
 const activeTab = ref('metrics')
@@ -259,10 +261,7 @@ const getStageDuration = (stage: Stage) => {
 }
 
 const handleWellChange = async () => {
-  if (selectedWellId.value) {
-    selectedWell.value = wellList.value.find(w => w.id === selectedWellId.value) || null
-    await loadLifecycleData()
-  }
+  await loadLifecycleData()
 }
 
 const selectStage = (stage: Stage) => {
@@ -272,13 +271,13 @@ const selectStage = (stage: Stage) => {
 }
 
 const loadWellList = async () => {
-  wellList.value = [
-    { id: 1, wellCode: 'A-001', wellName: 'A-01井', blockName: '胜利油田', status: '生产中' },
-    { id: 2, wellCode: 'B-003', wellName: 'B-03井', blockName: '胜利油田', status: '钻井中' },
-    { id: 3, wellCode: 'C-002', wellName: 'C-02井', blockName: '胜利油田', status: '生产中' }
-  ]
-  selectedWellId.value = 1
-  selectedWell.value = wellList.value[0]
+  // 使用井位页共享的数据源；之前选中的井若已被删除则回退到第一口井
+  await wellStore.fetchWells(true)
+  if (!wellStore.getWellById(selectedWellId.value) && wellStore.wells.length > 0) {
+    selectedWellId.value = wellStore.wells[0].id
+  } else if (wellStore.wells.length === 0) {
+    selectedWellId.value = null
+  }
 }
 
 const loadLifecycleData = async () => {
@@ -542,6 +541,16 @@ onMounted(async () => {
   await loadWellList()
   await loadLifecycleData()
 })
+
+// 井位被删除或列表变化后，保证下拉始终指向一口存在的井
+watch(
+  () => wellList.value.length,
+  () => {
+    if (selectedWellId.value && !wellStore.getWellById(selectedWellId.value)) {
+      selectedWellId.value = wellStore.wells[0]?.id ?? null
+    }
+  }
+)
 </script>
 
 <style scoped lang="scss">
