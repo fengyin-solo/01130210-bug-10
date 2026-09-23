@@ -9,20 +9,20 @@
           </el-button>
         </div>
       </template>
-      
-      <el-form :model="queryForm" inline class="mb-20">
+
+      <el-form :model="wellStore.filters" inline class="mb-20">
         <el-form-item label="井名">
-          <el-input v-model="queryForm.wellName" placeholder="请输入井名" clearable />
+          <el-input v-model="wellStore.filters.wellName" placeholder="请输入井名" clearable @keyup.enter="handleQuery" />
         </el-form-item>
         <el-form-item label="井型">
-          <el-select v-model="queryForm.wellType" placeholder="请选择井型" clearable>
+          <el-select v-model="wellStore.filters.wellType" placeholder="请选择井型" clearable>
             <el-option label="探井" value="探井" />
             <el-option label="开发井" value="开发井" />
             <el-option label="评价井" value="评价井" />
           </el-select>
         </el-form-item>
         <el-form-item label="状态">
-          <el-select v-model="queryForm.status" placeholder="请选择状态" clearable>
+          <el-select v-model="wellStore.filters.status" placeholder="请选择状态" clearable>
             <el-option label="钻井中" value="钻井中" />
             <el-option label="生产中" value="生产中" />
             <el-option label="待修井" value="待修井" />
@@ -35,7 +35,18 @@
         </el-form-item>
       </el-form>
 
-      <el-table :data="tableData" border stripe style="width: 100%" v-loading="loading">
+      <el-alert
+        v-if="wellStore.listError"
+        :title="wellStore.listError"
+        type="error"
+        show-icon
+        :closable="false"
+        class="mb-20"
+      >
+        <el-button type="danger" size="small" @click="wellStore.refreshAll()">重试</el-button>
+      </el-alert>
+
+      <el-table :data="wellStore.list" border stripe style="width: 100%" v-loading="wellStore.listLoading">
         <el-table-column prop="wellCode" label="井号" width="120" />
         <el-table-column prop="wellName" label="井名" width="120" />
         <el-table-column prop="wellType" label="井型" width="100" />
@@ -53,52 +64,74 @@
           <template #default="{ row }">
             <el-button type="primary" size="small" link @click="handleView(row)">查看</el-button>
             <el-button type="primary" size="small" link @click="handleEdit(row)">编辑</el-button>
-            <el-button type="danger" size="small" link @click="handleDelete(row)">删除</el-button>
+            <el-button
+              type="danger"
+              size="small"
+              link
+              :loading="wellStore.deletingId === row.id"
+              @click="handleDelete(row)"
+            >删除</el-button>
           </template>
         </el-table-column>
       </el-table>
 
       <el-pagination
-        v-model:current-page="pagination.page"
-        v-model:page-size="pagination.size"
-        :total="pagination.total"
+        v-model:current-page="currentPage"
+        v-model:page-size="pageSize"
+        :total="wellStore.total"
         :page-sizes="[10, 20, 50, 100]"
         layout="total, sizes, prev, pager, next, jumper"
         class="mt-20"
-        @size-change="handleQuery"
-        @current-change="handleQuery"
+        @size-change="handleSizeChange"
+        @current-change="handlePageChange"
       />
     </el-card>
 
-    <el-dialog v-model="dialogVisible" :title="dialogTitle" width="600px">
-      <el-form :model="wellForm" :rules="wellRules" ref="wellFormRef" label-width="100px">
+    <!--
+      非模态弹窗：编辑时仍可操作列表（例如尝试删除正在编辑的井，会被拒绝）。
+      草稿保存在 store 中：保存失败、列表刷新、跳转详情再返回都不会丢失。
+    -->
+    <el-dialog
+      v-model="dialogVisible"
+      :title="dialogTitle"
+      width="600px"
+      :modal="false"
+      :close-on-click-modal="false"
+    >
+      <el-form
+        v-if="wellStore.editingWell"
+        :model="wellStore.editingWell"
+        :rules="wellRules"
+        ref="wellFormRef"
+        label-width="100px"
+      >
         <el-form-item label="井号" prop="wellCode">
-          <el-input v-model="wellForm.wellCode" placeholder="请输入井号" />
+          <el-input v-model="wellStore.editingWell.wellCode" placeholder="请输入井号" />
         </el-form-item>
         <el-form-item label="井名" prop="wellName">
-          <el-input v-model="wellForm.wellName" placeholder="请输入井名" />
+          <el-input v-model="wellStore.editingWell.wellName" placeholder="请输入井名" />
         </el-form-item>
         <el-form-item label="井型" prop="wellType">
-          <el-select v-model="wellForm.wellType" placeholder="请选择井型" style="width: 100%">
+          <el-select v-model="wellStore.editingWell.wellType" placeholder="请选择井型" style="width: 100%">
             <el-option label="探井" value="探井" />
             <el-option label="开发井" value="开发井" />
             <el-option label="评价井" value="评价井" />
           </el-select>
         </el-form-item>
         <el-form-item label="区块" prop="blockName">
-          <el-input v-model="wellForm.blockName" placeholder="请输入区块" />
+          <el-input v-model="wellStore.editingWell.blockName" placeholder="请输入区块" />
         </el-form-item>
         <el-form-item label="经度" prop="longitude">
-          <el-input-number v-model="wellForm.longitude" :precision="6" style="width: 100%" />
+          <el-input-number v-model="wellStore.editingWell.longitude" :precision="6" style="width: 100%" />
         </el-form-item>
         <el-form-item label="纬度" prop="latitude">
-          <el-input-number v-model="wellForm.latitude" :precision="6" style="width: 100%" />
+          <el-input-number v-model="wellStore.editingWell.latitude" :precision="6" style="width: 100%" />
         </el-form-item>
         <el-form-item label="设计井深" prop="designDepth">
-          <el-input-number v-model="wellForm.designDepth" :min="0" style="width: 100%" />
+          <el-input-number v-model="wellStore.editingWell.designDepth" :min="0" style="width: 100%" />
         </el-form-item>
         <el-form-item label="状态" prop="status">
-          <el-select v-model="wellForm.status" placeholder="请选择状态" style="width: 100%">
+          <el-select v-model="wellStore.editingWell.status" placeholder="请选择状态" style="width: 100%">
             <el-option label="钻井中" value="钻井中" />
             <el-option label="生产中" value="生产中" />
             <el-option label="待修井" value="待修井" />
@@ -108,54 +141,41 @@
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="handleSubmit">确定</el-button>
+        <el-button type="primary" :loading="wellStore.submitting" @click="handleSubmit">确定</el-button>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, FormInstance } from 'element-plus'
+import { useWellStore } from '@/store/modules/well'
+import type { Well } from '@/types/well'
 
-const loading = ref(false)
-const dialogVisible = ref(false)
-const dialogTitle = ref('')
-const isEdit = ref(false)
+const router = useRouter()
+const wellStore = useWellStore()
 const wellFormRef = ref<FormInstance>()
 
-const queryForm = reactive({
-  wellName: '',
-  wellType: '',
-  status: ''
+const dialogVisible = computed({
+  get: () => wellStore.editingWell !== null,
+  set: (val: boolean) => {
+    // 主动关闭弹窗视为取消编辑，清空草稿
+    if (!val) wellStore.closeEditor()
+  }
 })
 
-const pagination = reactive({
-  page: 1,
-  size: 10,
-  total: 0
+const dialogTitle = computed(() => (wellStore.editingMode === 'edit' ? '编辑井位' : '新增井位'))
+
+const currentPage = computed({
+  get: () => wellStore.page,
+  set: (val: number) => { wellStore.page = val }
 })
 
-const tableData = ref([
-  { id: 1, wellCode: 'A-001', wellName: 'A-01井', wellType: '开发井', blockName: '胜利油田', longitude: 118.5236, latitude: 38.2356, designDepth: 3500, status: '生产中', createTime: '2024-01-01 10:00:00' },
-  { id: 2, wellCode: 'B-003', wellName: 'B-03井', wellType: '探井', blockName: '胜利油田', longitude: 118.8562, latitude: 38.5123, designDepth: 4200, status: '钻井中', createTime: '2024-01-02 14:30:00' },
-  { id: 3, wellCode: 'C-002', wellName: 'C-02井', wellType: '开发井', blockName: '胜利油田', longitude: 119.1254, latitude: 38.3456, designDepth: 3800, status: '生产中', createTime: '2024-01-03 09:15:00' },
-  { id: 4, wellCode: 'D-005', wellName: 'D-05井', wellType: '评价井', blockName: '胜利油田', longitude: 118.6587, latitude: 38.7895, designDepth: 4000, status: '待修井', createTime: '2024-01-04 16:45:00' },
-  { id: 5, wellCode: 'E-001', wellName: 'E-01井', wellType: '开发井', blockName: '胜利油田', longitude: 118.9563, latitude: 38.4562, designDepth: 3600, status: '关停井', createTime: '2024-01-05 11:20:00' }
-])
-
-pagination.total = tableData.value.length
-
-const wellForm = reactive({
-  id: null,
-  wellCode: '',
-  wellName: '',
-  wellType: '',
-  blockName: '',
-  longitude: null,
-  latitude: null,
-  designDepth: null,
-  status: ''
+const pageSize = computed({
+  get: () => wellStore.size,
+  set: (val: number) => { wellStore.size = val }
 })
 
 const wellRules = {
@@ -174,52 +194,75 @@ const getStatusType = (status: string) => {
   return map[status] || 'info'
 }
 
+// 每次进入列表（含从详情页返回）都按当前筛选重新拉取列表与统计
+onMounted(() => {
+  wellStore.refreshAll().catch(() => {
+    // 错误已在 store.listError 中展示
+  })
+})
+
 const handleQuery = () => {
-  loading.value = true
-  setTimeout(() => {
-    loading.value = false
-  }, 500)
+  wellStore.page = 1
+  wellStore.fetchList().catch(() => {})
 }
 
 const handleReset = () => {
-  Object.assign(queryForm, { wellName: '', wellType: '', status: '' })
-  handleQuery()
+  wellStore.resetFilters()
+  wellStore.fetchList().catch(() => {})
+}
+
+const handleSizeChange = (size: number) => {
+  wellStore.setSize(size)
+  wellStore.fetchList().catch(() => {})
+}
+
+const handlePageChange = (page: number) => {
+  wellStore.setPage(page)
+  wellStore.fetchList().catch(() => {})
 }
 
 const handleAdd = () => {
-  isEdit.value = false
-  dialogTitle.value = '新增井位'
-  Object.assign(wellForm, { id: null, wellCode: '', wellName: '', wellType: '', blockName: '', longitude: null, latitude: null, designDepth: null, status: '' })
-  dialogVisible.value = true
+  wellStore.openCreate()
+  nextTick(() => wellFormRef.value?.clearValidate())
 }
 
-const handleEdit = (row: any) => {
-  isEdit.value = true
-  dialogTitle.value = '编辑井位'
-  Object.assign(wellForm, row)
-  dialogVisible.value = true
+const handleEdit = (row: Well) => {
+  wellStore.openEdit(row)
+  nextTick(() => wellFormRef.value?.clearValidate())
 }
 
-const handleView = (row: any) => {
-  ElMessage.info('查看井位详情: ' + row.wellName)
+const handleView = (row: Well) => {
+  router.push(`/well/${row.id}`)
 }
 
-const handleDelete = (row: any) => {
+const handleDelete = (row: Well) => {
   ElMessageBox.confirm(`确定要删除 ${row.wellName} 吗?`, '提示', {
     confirmButtonText: '确定',
     cancelButtonText: '取消',
     type: 'warning'
-  }).then(() => {
-    ElMessage.success('删除成功')
-  })
+  }).then(async () => {
+    try {
+      await wellStore.removeWell(row)
+      ElMessage.success('删除成功')
+    } catch (e: any) {
+      // 正在编辑该井、接口失败等情况：拒绝并说明原因
+      ElMessage.error(e?.message || '删除失败')
+    }
+  }).catch(() => {})
 }
 
 const handleSubmit = () => {
   if (!wellFormRef.value) return
-  wellFormRef.value.validate((valid) => {
-    if (valid) {
-      dialogVisible.value = false
-      ElMessage.success(isEdit.value ? '编辑成功' : '新增成功')
+  wellFormRef.value.validate(async valid => {
+    if (!valid) return
+    const isEdit = wellStore.editingMode === 'edit'
+    try {
+      await wellStore.saveEditing()
+      ElMessage.success(isEdit ? '编辑成功' : '新增成功')
+      // 保存成功后草稿已清除，弹窗随之关闭
+    } catch (e: any) {
+      // 接口失败 / 重复井号：弹窗保持打开、草稿与已填内容原样保留
+      ElMessage.error(e?.message || '保存失败')
     }
   })
 }

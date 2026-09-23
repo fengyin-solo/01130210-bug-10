@@ -1,46 +1,34 @@
-import request from '@/utils/request'
+import type { WellForm, WellQuery } from '@/types/well'
+import {
+  mockCreateWell,
+  mockDeleteWell,
+  mockGetWellDetail,
+  mockGetWellList,
+  mockGetWellStatistics,
+  mockUpdateWell
+} from './mock/well'
 
-export function getWellList(params: any) {
-  return request({
-    url: '/well/list',
-    method: 'get',
-    params
-  })
+// 当前项目无后端，接口由前端 mock 提供；切换真实后端时只需将实现换回 request(...)
+export function getWellList(params: WellQuery) {
+  return mockGetWellList(params)
 }
 
 export function getWellDetail(id: number) {
-  return request({
-    url: `/well/${id}`,
-    method: 'get'
-  })
+  return mockGetWellDetail(id)
 }
 
-export function createWell(data: any) {
-  return request({
-    url: '/well',
-    method: 'post',
-    data
-  })
+export function createWell(data: WellForm) {
+  return mockCreateWell(data)
 }
 
-export function updateWell(data: any) {
-  return request({
-    url: '/well',
-    method: 'put',
-    data
-  })
+export function updateWell(data: WellForm) {
+  return mockUpdateWell(data)
 }
 
 export function deleteWell(id: number) {
-  return request({
-    url: `/well/${id}`,
-    method: 'delete'
-  })
+  return mockDeleteWell(id)
 }
 
 export function getWellStatistics() {
-  return request({
-    url: '/well/statistics',
-    method: 'get'
-  })
+  return mockGetWellStatistics()
 }

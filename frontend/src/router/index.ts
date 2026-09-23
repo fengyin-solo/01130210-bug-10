@@ -26,6 +26,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '井位管理', icon: 'Position' }
       },
       {
+        path: 'well/:id',
+        name: 'WellDetail',
+        component: () => import('@/views/well/detail.vue'),
+        meta: { title: '井位详情', hidden: true }
+      },
+      {
         path: 'lifecycle',
         name: 'Lifecycle',
         component: () => import('@/views/lifecycle/index.vue'),

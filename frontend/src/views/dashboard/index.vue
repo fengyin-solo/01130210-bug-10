@@ -106,17 +106,21 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, onMounted } from 'vue'
 import * as echarts from 'echarts'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
+import { useWellStore } from '@/store/modules/well'
 
-const statistics = ref({
-  wellCount: 156,
-  drillingCount: 12,
-  productionCount: 89,
+const wellStore = useWellStore()
+
+// 井位相关统计统一取井位 store，编辑/删除后回到驾驶舱不会残留旧值
+const statistics = computed(() => ({
+  wellCount: wellStore.wellStatistics.wellCount,
+  drillingCount: wellStore.wellStatistics.drillingCount,
+  productionCount: wellStore.wellStatistics.productionCount,
   alarmCount: 5
-})
+}))
 
 const alarmList = ref([
   { wellName: 'A-01井', alarmType: '钻压异常', level: '严重', time: '2024-01-15 10:30' },
@@ -175,6 +179,7 @@ const initProductionTrendChart = () => {
 const initWellStatusChart = () => {
   if (!wellStatusChart.value) return
   const chart = echarts.init(wellStatusChart.value)
+  const s = wellStore.wellStatistics
   chart.setOption({
     tooltip: { trigger: 'item' },
     legend: { orient: 'vertical', left: 'left' },
@@ -184,10 +189,10 @@ const initWellStatusChart = () => {
         type: 'pie',
         radius: '60%',
         data: [
-          { value: 89, name: '生产中', itemStyle: { color: '#22c55e' } },
-          { value: 12, name: '钻井中', itemStyle: { color: '#3b82f6' } },
-          { value: 35, name: '待修井', itemStyle: { color: '#f59e0b' } },
-          { value: 20, name: '关停井', itemStyle: { color: '#ef4444' } }
+          { value: s.productionCount, name: '生产中', itemStyle: { color: '#22c55e' } },
+          { value: s.drillingCount, name: '钻井中', itemStyle: { color: '#3b82f6' } },
+          { value: s.maintenanceCount, name: '待修井', itemStyle: { color: '#f59e0b' } },
+          { value: s.shutdownCount, name: '关停井', itemStyle: { color: '#ef4444' } }
         ],
         emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0, 0, 0, 0.5)' } }
       }
@@ -236,7 +241,13 @@ const initMap = () => {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
+  // 每次进入驾驶舱都重新拉取井位统计，避免残留旧值
+  try {
+    await wellStore.fetchStatistics()
+  } catch (e) {
+    // 拉取失败时保留上一次的统计值，图表仍可渲染
+  }
   initProductionTrendChart()
   initWellStatusChart()
   initMap()
